@@ -1,4 +1,4 @@
-from api.models import User, Profile
+from api.models import User, Profile, Customer
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -73,3 +73,8 @@ class ChangePasswordSerializer(serializers.Serializer):
         if attrs['current_password'] == attrs['new_password']:
             raise serializers.ValidationError("New password cannot be the same as the current password.")
         return attrs
+    
+class CustomerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Customer
+        fields = '__all__'

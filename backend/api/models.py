@@ -37,3 +37,36 @@ post_save.connect(create_user_profile, sender=User)
 post_save.connect(save_user_profile, sender=User)
 
 
+class Customer(models.Model):
+    customerID = models.CharField(max_length=255)
+    gender = models.IntegerField()
+    SeniorCitizen = models.IntegerField()
+    Partner = models.IntegerField()
+    Dependents = models.IntegerField()
+    tenure = models.IntegerField()
+    PhoneService = models.IntegerField()
+    MultipleLines = models.IntegerField()
+    InternetService = models.CharField(max_length=255)
+    OnlineSecurity = models.IntegerField()
+    OnlineBackup = models.IntegerField()
+    DeviceProtection = models.IntegerField()
+    TechSupport = models.IntegerField()
+    StreamingTV = models.IntegerField()
+    StreamingMovies = models.IntegerField()
+    Contract = models.CharField(max_length=255)
+    PaperlessBilling = models.IntegerField()
+    PaymentMethod = models.CharField(max_length=255)
+    MonthlyCharges = models.FloatField()
+    TotalCharges = models.FloatField()
+    Churn = models.IntegerField()
+    Age = models.IntegerField()
+    SatisfactionScore = models.IntegerField()
+    CustomerSupportCalls = models.IntegerField()
+    PaymentTimeliness = models.IntegerField()
+    LifetimeValue = models.FloatField()
+    AverageDailyUsage = models.FloatField()
+    Email = models.EmailField()
+
+    def __str__(self):
+        return self.customerID
+
