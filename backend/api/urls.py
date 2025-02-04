@@ -6,6 +6,7 @@ from django.conf.urls.static import static
 import django.contrib.auth.views as auth_views
 from rest_framework_simplejwt.views import TokenRefreshView
 
+
 urlpatterns = [
     path("token/", views.MyTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
@@ -20,4 +21,5 @@ urlpatterns = [
     path('password-reset/done/', auth_views.PasswordResetDoneView.as_view(), name='password_reset_done'),
     path('reset/<uidb64>/<token>/', auth_views.PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     path('reset/done/', auth_views.PasswordResetCompleteView.as_view(), name='password_reset_complete'),
+     path('upload/', views.UploadExcelView.as_view(), name='upload-excel'),
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

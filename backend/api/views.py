@@ -1,8 +1,9 @@
+import pandas as pd
 from django.shortcuts import render
 
 # Create your views here.
-from api.models import User, Profile
-from api.serializers import UserSerializer, MyTokenObtainPairSerializer, RegisterSerializer ,ProfileSerializer
+from api.models import User, Profile ,Customer
+from api.serializers import UserSerializer, MyTokenObtainPairSerializer, RegisterSerializer ,ProfileSerializer ,CustomerSerializer
 from rest_framework.decorators import api_view,permission_classes
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework import generics,status
@@ -134,3 +135,47 @@ class PasswordResetRequestView(APIView):
 
         # Always return success to prevent email enumeration
         return Response({"message": "If an account with this email exists, a reset link has been sent."}, status=status.HTTP_200_OK)
+    
+class UploadExcelView(APIView):
+        def post(self, request, *args, **kwargs):
+            file = request.FILES['file']
+            df = pd.read_excel(file)
+    
+            for index, row in df.iterrows():
+                customer_data = {
+                    'customerID': row['customerID'],
+                    'gender': row['gender'],
+                    'SeniorCitizen': row['SeniorCitizen'],
+                    'Partner': row['Partner'],
+                    'Dependents': row['Dependents'],
+                    'tenure': row['tenure'],
+                    'PhoneService': row['PhoneService'],
+                    'MultipleLines': row['MultipleLines'],
+                    'InternetService': row['InternetService'],
+                    'OnlineSecurity': row['OnlineSecurity'],
+                    'OnlineBackup': row['OnlineBackup'],
+                    'DeviceProtection': row['DeviceProtection'],
+                    'TechSupport': row['TechSupport'],
+                    'StreamingTV': row['StreamingTV'],
+                    'StreamingMovies': row['StreamingMovies'],
+                    'Contract': row['Contract'],
+                    'PaperlessBilling': row['PaperlessBilling'],
+                    'PaymentMethod': row['PaymentMethod'],
+                    'MonthlyCharges': row['MonthlyCharges'],
+                    'TotalCharges': row['TotalCharges'],
+                    'Churn': row['Churn'],
+                    'Age': row['Age'],
+                    'SatisfactionScore': row['SatisfactionScore'],
+                    'CustomerSupportCalls': row['CustomerSupportCalls'],
+                    'PaymentTimeliness': row['PaymentTimeliness'],
+                    'LifetimeValue': row['LifetimeValue'],
+                    'AverageDailyUsage': row['AverageDailyUsage'],
+                    'Email': row['Email'],
+                }
+                serializer = CustomerSerializer(data=customer_data)
+                if serializer.is_valid():
+                    serializer.save()
+                else:
+                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+            return Response({"message": "Data uploaded successfully"}, status=status.HTTP_201_CREATED)
