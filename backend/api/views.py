@@ -1,5 +1,5 @@
 import pandas as pd
-from django.shortcuts import render
+from django.shortcuts import render , redirect
 
 # Create your views here.
 from api.models import User, Profile ,Customer
@@ -18,6 +18,8 @@ from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from rest_framework.views import APIView
+from django.core.files.storage import FileSystemStorage
+from django.contrib import messages
 
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
@@ -37,6 +39,7 @@ def getRoutes(request):
         '/api/token/refresh/'
         '/api/profile/',
         '/api/profile/update/'
+        '/api/upload/'
      ]
      return Response(routes)
 
@@ -136,46 +139,61 @@ class PasswordResetRequestView(APIView):
         # Always return success to prevent email enumeration
         return Response({"message": "If an account with this email exists, a reset link has been sent."}, status=status.HTTP_200_OK)
     
-class UploadExcelView(APIView):
-        def post(self, request, *args, **kwargs):
-            file = request.FILES['file']
-            df = pd.read_excel(file)
-    
-            for index, row in df.iterrows():
-                customer_data = {
-                    'customerID': row['customerID'],
-                    'gender': row['gender'],
-                    'SeniorCitizen': row['SeniorCitizen'],
-                    'Partner': row['Partner'],
-                    'Dependents': row['Dependents'],
-                    'tenure': row['tenure'],
-                    'PhoneService': row['PhoneService'],
-                    'MultipleLines': row['MultipleLines'],
-                    'InternetService': row['InternetService'],
-                    'OnlineSecurity': row['OnlineSecurity'],
-                    'OnlineBackup': row['OnlineBackup'],
-                    'DeviceProtection': row['DeviceProtection'],
-                    'TechSupport': row['TechSupport'],
-                    'StreamingTV': row['StreamingTV'],
-                    'StreamingMovies': row['StreamingMovies'],
-                    'Contract': row['Contract'],
-                    'PaperlessBilling': row['PaperlessBilling'],
-                    'PaymentMethod': row['PaymentMethod'],
-                    'MonthlyCharges': row['MonthlyCharges'],
-                    'TotalCharges': row['TotalCharges'],
-                    'Churn': row['Churn'],
-                    'Age': row['Age'],
-                    'SatisfactionScore': row['SatisfactionScore'],
-                    'CustomerSupportCalls': row['CustomerSupportCalls'],
-                    'PaymentTimeliness': row['PaymentTimeliness'],
-                    'LifetimeValue': row['LifetimeValue'],
-                    'AverageDailyUsage': row['AverageDailyUsage'],
-                    'Email': row['Email'],
-                }
-                serializer = CustomerSerializer(data=customer_data)
-                if serializer.is_valid():
-                    serializer.save()
-                else:
-                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-            return Response({"message": "Data uploaded successfully"}, status=status.HTTP_201_CREATED)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])  # Protect the API if needed
+def upload_customers_from_excel(request):
+    if request.FILES.get('excel_file'):
+        excel_file = request.FILES['excel_file']
+        
+        # Save the uploaded file temporarily
+        fs = FileSystemStorage()
+        filename = fs.save(excel_file.name, excel_file)
+        uploaded_file_path = fs.path(filename)
+
+        try:
+            # Read the Excel file
+            df = pd.read_excel(uploaded_file_path)
+
+            # Iterate through each row and create Customer instances
+            for _, row in df.iterrows():
+                Customer.objects.create(
+                    customerID=row['customerID'],
+                    gender=row['gender'],
+                    SeniorCitizen=row['SeniorCitizen'],
+                    Partner=row['Partner'],
+                    Dependents=row['Dependents'],
+                    tenure=row['tenure'],
+                    PhoneService=row['PhoneService'],
+                    MultipleLines=row['MultipleLines'],
+                    InternetService=row['InternetService'],
+                    OnlineSecurity=row['OnlineSecurity'],
+                    OnlineBackup=row['OnlineBackup'],
+                    DeviceProtection=row['DeviceProtection'],
+                    TechSupport=row['TechSupport'],
+                    StreamingTV=row['StreamingTV'],
+                    StreamingMovies=row['StreamingMovies'],
+                    Contract=row['Contract'],
+                    PaperlessBilling=row['PaperlessBilling'],
+                    PaymentMethod=row['PaymentMethod'],
+                    MonthlyCharges=row['MonthlyCharges'],
+                    TotalCharges=row['TotalCharges'],
+                    Churn=row['Churn'],
+                    Age=row['Age'],
+                    SatisfactionScore=row['SatisfactionScore'],
+                    CustomerSupportCalls=row['CustomerSupportCalls'],
+                    PaymentTimeliness=row['PaymentTimeliness'],
+                    LifetimeValue=row['LifetimeValue'],
+                    AverageDailyUsage=row['AverageDailyUsage'],
+                    Email=row['Email']
+                )
+
+            # Return JSON response instead of rendering a template
+            return Response({"message": "Data imported successfully!"}, status=status.HTTP_201_CREATED)
+        
+        except Exception as e:
+            return Response({"error": f"Error occurred: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        finally:
+            fs.delete(filename)
+
+    return Response({"error": "No file provided."}, status=status.HTTP_400_BAD_REQUEST)

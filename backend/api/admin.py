@@ -11,11 +11,19 @@ class ProfileAdmin(admin.ModelAdmin):
     
 
 @admin.register(Customer)
-class Customer(admin.ModelAdmin):
+class CustomerAdmin(admin.ModelAdmin):
     list_display = ('customerID', 'Email', 'Churn', 'SatisfactionScore', 'MonthlyCharges', 'PaymentMethod')
     list_filter = ('Churn', 'PaymentMethod', 'Contract')
     search_fields = ('customerID', 'Email', 'PaymentMethod')
     ordering = ('-SatisfactionScore',)
+    list_per_page = 50
+    readonly_fields = ('customerID',)
+
+    fieldsets = (
+        ('Basic Info', {'fields': ('customerID', 'Email', 'Churn')}),
+        ('Payment Details', {'fields': ('PaymentMethod', 'MonthlyCharges', 'Contract')}),
+        ('Satisfaction Metrics', {'fields': ('SatisfactionScore', 'LifetimeValue')}),
+    )
 
 
 

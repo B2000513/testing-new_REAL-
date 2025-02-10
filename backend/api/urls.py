@@ -21,5 +21,5 @@ urlpatterns = [
     path('password-reset/done/', auth_views.PasswordResetDoneView.as_view(), name='password_reset_done'),
     path('reset/<uidb64>/<token>/', auth_views.PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     path('reset/done/', auth_views.PasswordResetCompleteView.as_view(), name='password_reset_complete'),
-     path('upload/', views.UploadExcelView.as_view(), name='upload-excel'),
+     path('upload/', views.upload_customers_from_excel, name='upload-customer'),
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
