@@ -20,6 +20,7 @@ from django.template.loader import render_to_string
 from rest_framework.views import APIView
 from django.core.files.storage import FileSystemStorage
 from django.contrib import messages
+from django.db import transaction
 
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
@@ -140,60 +141,77 @@ class PasswordResetRequestView(APIView):
         return Response({"message": "If an account with this email exists, a reset link has been sent."}, status=status.HTTP_200_OK)
     
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])  # Protect the API if needed
+@permission_classes([IsAuthenticated])  # Protect API access
 def upload_customers_from_excel(request):
-    if request.FILES.get('excel_file'):
-        excel_file = request.FILES['excel_file']
+    if 'excel_file' not in request.FILES:
+        return Response({"error": "No file provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+    excel_file = request.FILES['excel_file']
+    fs = FileSystemStorage()
+    filename = fs.save(excel_file.name, excel_file)
+    uploaded_file_path = fs.path(filename)
+
+    try:
+        df = pd.read_excel(uploaded_file_path)
+
         
-        # Save the uploaded file temporarily
-        fs = FileSystemStorage()
-        filename = fs.save(excel_file.name, excel_file)
-        uploaded_file_path = fs.path(filename)
+        with transaction.atomic():  # Ensure atomicity
+            # **1. Clear all existing customer records**
+            Customer.objects.all().delete()
 
-        try:
-            # Read the Excel file
-            df = pd.read_excel(uploaded_file_path)
+            # **2. Store unique emails to avoid duplication in the new upload**
+            unique_emails = set()
 
-            # Iterate through each row and create Customer instances
+            customers = []
             for _, row in df.iterrows():
-                Customer.objects.create(
-                    customerID=row['customerID'],
-                    gender=row['gender'],
-                    SeniorCitizen=row['SeniorCitizen'],
-                    Partner=row['Partner'],
-                    Dependents=row['Dependents'],
-                    tenure=row['tenure'],
-                    PhoneService=row['PhoneService'],
-                    MultipleLines=row['MultipleLines'],
-                    InternetService=row['InternetService'],
-                    OnlineSecurity=row['OnlineSecurity'],
-                    OnlineBackup=row['OnlineBackup'],
-                    DeviceProtection=row['DeviceProtection'],
-                    TechSupport=row['TechSupport'],
-                    StreamingTV=row['StreamingTV'],
-                    StreamingMovies=row['StreamingMovies'],
-                    Contract=row['Contract'],
-                    PaperlessBilling=row['PaperlessBilling'],
-                    PaymentMethod=row['PaymentMethod'],
-                    MonthlyCharges=row['MonthlyCharges'],
-                    TotalCharges=row['TotalCharges'],
-                    Churn=row['Churn'],
-                    Age=row['Age'],
-                    SatisfactionScore=row['SatisfactionScore'],
-                    CustomerSupportCalls=row['CustomerSupportCalls'],
-                    PaymentTimeliness=row['PaymentTimeliness'],
-                    LifetimeValue=row['LifetimeValue'],
-                    AverageDailyUsage=row['AverageDailyUsage'],
-                    Email=row['Email']
-                )
+                email = str(row.get('Email', '')).strip()
 
-            # Return JSON response instead of rendering a template
-            return Response({"message": "Data imported successfully!"}, status=status.HTTP_201_CREATED)
-        
-        except Exception as e:
-            return Response({"error": f"Error occurred: {e}"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        finally:
+                # Skip empty or duplicate emails
+                if not email or email in unique_emails:
+                    continue  
+                
+                unique_emails.add(email)  # Add email to the set
+
+                customers.append(Customer(
+                    customerID=row.get('customerID', ''),
+                    gender=row.get('gender', 0),
+                    SeniorCitizen=row.get('SeniorCitizen', 0),
+                    Partner=row.get('Partner', 0),
+                    Dependents=row.get('Dependents', 0),
+                    tenure=row.get('tenure', 0),
+                    PhoneService=row.get('PhoneService', 0),
+                    MultipleLines=row.get('MultipleLines', 0),
+                    InternetService=row.get('InternetService', ''),
+                    OnlineSecurity=row.get('OnlineSecurity', 0),
+                    OnlineBackup=row.get('OnlineBackup', 0),
+                    DeviceProtection=row.get('DeviceProtection', 0),
+                    TechSupport=row.get('TechSupport', 0),
+                    StreamingTV=row.get('StreamingTV', 0),
+                    StreamingMovies=row.get('StreamingMovies', 0),
+                    Contract=row.get('Contract', ''),
+                    PaperlessBilling=row.get('PaperlessBilling', 0),
+                    PaymentMethod=row.get('PaymentMethod', ''),
+                    MonthlyCharges=row.get('MonthlyCharges', 0.0),
+                    TotalCharges=row.get('TotalCharges', 0.0),
+                    Churn=row.get('Churn', 0),
+                    Age=row.get('Age', 0),
+                    SatisfactionScore=row.get('SatisfactionScore', 0),
+                    CustomerSupportCalls=row.get('CustomerSupportCalls', 0),
+                    PaymentTimeliness=row.get('PaymentTimeliness', 0),
+                    LifetimeValue=row.get('LifetimeValue', 0.0),
+                    AverageDailyUsage=row.get('AverageDailyUsage', 0.0),
+                    Email=email
+                ))
+
+            # **3. Bulk insert for efficiency**
+            Customer.objects.bulk_create(customers)
+
+        return Response({"message": "Data imported successfully!"}, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        return Response({"error": f"Error occurred: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+    finally:
+        if fs.exists(filename):  # Ensure file exists before deleting
             fs.delete(filename)
-
-    return Response({"error": "No file provided."}, status=status.HTTP_400_BAD_REQUEST)

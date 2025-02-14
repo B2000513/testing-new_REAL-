@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db import transaction
 from api.models import User, Profile, Customer
 
 # Register your models here.
@@ -24,6 +25,18 @@ class CustomerAdmin(admin.ModelAdmin):
         ('Payment Details', {'fields': ('PaymentMethod', 'MonthlyCharges', 'Contract')}),
         ('Satisfaction Metrics', {'fields': ('SatisfactionScore', 'LifetimeValue')}),
     )
+
+    actions = ['clear_customer_data']
+
+    def clear_customer_data(self, request, queryset):
+        try:
+            with transaction.atomic():
+                Customer.objects.all().delete()
+            self.message_user(request, "All customer data has been cleared.", messages.SUCCESS)
+        except Exception as e:
+            self.message_user(request, f"Error clearing data: {e}", messages.ERROR)
+
+    clear_customer_data.short_description = "Clear all customer data"
 
 
 
