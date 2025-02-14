@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.db import transaction
 from api.models import User, Profile, Customer
+from django.contrib import messages
 
 # Register your models here.
 class UserAdmin(admin.ModelAdmin):
