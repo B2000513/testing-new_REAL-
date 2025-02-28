@@ -39,8 +39,9 @@ def getRoutes(request):
         '/api/register/',
         '/api/token/refresh/'
         '/api/profile/',
-        '/api/profile/update/'
-        '/api/upload/'
+        '/api/profile/update/',
+        '/api/upload/',
+        '/api/customers/',
      ]
      return Response(routes)
 
@@ -215,3 +216,22 @@ def upload_customers_from_excel(request):
     finally:
         if fs.exists(filename):  # Ensure file exists before deleting
             fs.delete(filename)
+
+@api_view(['GET'])  # Protect API access
+@permission_classes([IsAuthenticated])
+def get_customers(request):
+    try:
+        customers = Customer.objects.all()  # Fetch all customers
+        serializer = CustomerSerializer(customers, many=True)  # Serialize the data
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+@permission_classes([IsAuthenticated])
+class CustomerListView(APIView):
+    def get(self, request):
+        # Debug: Log user making the request
+        print(f"User: {request.user}, Authenticated: {request.user.is_authenticated}")
+
+        customers = Customer.objects.all()
+        data = [{"id": c.id, "email": c.email, "churn": c.churn} for c in customers]
+        return Response(data)
