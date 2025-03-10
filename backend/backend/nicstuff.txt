@@ -1,0 +1,50 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import joblib
+
+
+# Preprocess data
+# Convert binary columns Yes/No to 1/0
+binary_columns = ['Partner', 'Dependents', 'PhoneService', 'MultipleLines', 
+                  'OnlineSecurity', 'OnlineBackup', 'DeviceProtection', 
+                  'TechSupport', 'StreamingTV', 'StreamingMovies', 
+                  'PaperlessBilling' ,'PaymentTimeliness' ,'gender', 'SatisfactionScore']
+
+synthetic_data[binary_columns] = synthetic_data[binary_columns].replace({'Yes': 1, 'No': 0, 'No phone service': 0, 'No internet service': 0 ,'On-time': 1, 'Late': 0,'Male': 1, 'Female': 0 , 'High': 1 , 'Low' : 0})
+
+
+# One-hot encode other categorical variables like 'InternetService', etc.
+df_encoded = pd.get_dummies(synthetic_data, drop_first=True)
+
+# Define feature variables (X) and target variable (y)
+X = df_encoded.drop('Churn', axis=1)  # Drop target column
+y = df_encoded['Churn']              # Target column
+
+# Split the dataset into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42)
+
+# train the Logistic Regression model with regularization
+model = LogisticRegression(max_iter=1000)  
+model.fit(X_train, y_train)
+
+# prediction
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:, 1]
+
+# Result
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Accuracy: {accuracy}")
+
+print("Synthetic Classification Report:")
+print(classification_report(y_test, y_pred))
+
+print("Confusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+# Feature Importance 
+coefficients = pd.DataFrame({'Feature': X.columns, 'Coefficient': model.coef_[0]})
+print("Feature Importance:")
+print(coefficients.sort_values(by='Coefficient', ascending=False))
