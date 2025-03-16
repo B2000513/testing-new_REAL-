@@ -1,4 +1,5 @@
 import pandas as pd
+import openai # Install with `pip install openai`
 from django.shortcuts import render , redirect
 
 # Create your views here.
@@ -21,6 +22,7 @@ from rest_framework.views import APIView
 from django.core.files.storage import FileSystemStorage
 from django.contrib import messages
 from django.db import transaction
+from django.http import JsonResponse
 
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
@@ -235,3 +237,21 @@ class CustomerListView(APIView):
         customers = Customer.objects.all()
         data = [{"id": c.id, "email": c.email, "churn": c.churn} for c in customers]
         return Response(data)
+    
+
+# AI Chatbot function
+def chatbot(request):
+    user_message = request.GET.get("message", "")
+    if not user_message:
+        return JsonResponse({"response": "Please provide a message."})
+
+    # Call AI model (OpenAI API)
+    openai.api_key = "your-openai-api-key"  # Replace with your API key
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": "You are a helpful customer support chatbot."},
+                  {"role": "user", "content": user_message}]
+    )
+    
+    bot_response = response["choices"][0]["message"]["content"]
+    return JsonResponse({"response": bot_response})
