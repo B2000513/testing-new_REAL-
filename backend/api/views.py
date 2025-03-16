@@ -1,5 +1,7 @@
 import pandas as pd
 import openai # Install with `pip install openai`
+import os
+from dotenv import load_dotenv
 from django.shortcuts import render , redirect
 
 # Create your views here.
@@ -246,7 +248,7 @@ def chatbot(request):
         return JsonResponse({"response": "Please provide a message."})
 
     # Call AI model (OpenAI API)
-    openai.api_key = "your-openai-api-key"  # Replace with your API key
+    openai.api_key = os.getenv("OPENAI_API_KEY")  # Replace with your API key
     response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[{"role": "system", "content": "You are a helpful customer support chatbot."},
