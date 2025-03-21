@@ -25,6 +25,10 @@ from django.core.files.storage import FileSystemStorage
 from django.contrib import messages
 from django.db import transaction
 from django.http import JsonResponse
+from .models import Customer  # Adjust based on your chatbot's needs
+from .serializers import CustomerSerializer  # Use a lightweight serializer
+from .llama_model import generate_response  # ✅ Import LLaMA chatbot function
+    
 
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
@@ -41,7 +45,7 @@ def getRoutes(request):
      routes =[
           '/api/token/',
         '/api/register/',
-        '/api/token/refresh/'
+        '/api/token/refresh/',
         '/api/profile/',
         '/api/profile/update/',
         '/api/upload/',
@@ -241,19 +245,23 @@ class CustomerListView(APIView):
         return Response(data)
     
 
-# AI Chatbot function
+@api_view(['GET'])
 def chatbot(request):
     user_message = request.GET.get("message", "")
+
     if not user_message:
         return JsonResponse({"response": "Please provide a message."})
 
-    # Call AI model (OpenAI API)
-    openai.api_key = os.getenv("OPENAI_API_KEY")  # Replace with your API key
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "system", "content": "You are a helpful customer support chatbot."},
-                  {"role": "user", "content": user_message}]
-    )
-    
-    bot_response = response["choices"][0]["message"]["content"]
-    return JsonResponse({"response": bot_response})
+    try:
+        bot_reply = generate_response(user_message)  # ✅ Call LLaMA model
+        return JsonResponse({"response": bot_reply})
+
+    except Exception as e:
+        return JsonResponse({"error": f"LLaMA Error: {str(e)}"}, status=500)
+
+
+@api_view(['GET'])
+def chatbot_customers(request):
+    # Only retrieve minimal data needed for chatbot (e.g., names, last interactions)
+    customers = Customer.objects.values('id', 'name', 'last_interaction')[:50]  # Limit results
+    return Response({'customers': list(customers)}) 
