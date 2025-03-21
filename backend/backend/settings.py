@@ -12,6 +12,10 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+import os
+from dotenv import load_dotenv
+
+load_dotenv() 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -45,7 +49,8 @@ INSTALLED_APPS = [
     'corsheaders',
     'import_export',
     'drf_spectacular',
-    'drf_spectacular_sidecar',  
+    'drf_spectacular_sidecar', 
+     
 ]
 
 MIDDLEWARE = [
@@ -195,4 +200,21 @@ EMAIL_HOST_USER = 'ilxyvm90@gmail.com'
 EMAIL_HOST_PASSWORD = 'dnuf wikb gwxn vrmk'
 
 
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = False  # ❌ Disable wildcard '*' because it conflicts with credentials
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",  # ✅ Allow React frontend
+]
+
+CORS_ALLOW_CREDENTIALS = True  # ✅ Allow authentication tokens
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",  # ✅ Trust React frontend for CSRF
+]
+
+CORS_ALLOW_HEADERS = [
+    "authorization",
+    "content-type",
+    "x-csrftoken",
+    "accept",
+]
+
