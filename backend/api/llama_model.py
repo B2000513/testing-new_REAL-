@@ -4,9 +4,15 @@ import re
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from django.db.models import Q
 from api.models import Customer  # Import your Customer model
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
 
 # ✅ Hugging Face API Token
-HUGGINGFACE_TOKEN = "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"
+HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_KEY")
 login(HUGGINGFACE_TOKEN)
 
 # ✅ Model Name
