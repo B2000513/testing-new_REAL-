@@ -1,10 +1,15 @@
 import pandas as pd
 import openai # Install with `pip install openai`
 import os
+import pickle
 from dotenv import load_dotenv
 from django.shortcuts import render , redirect
+import joblib
+
 
 # Create your views here.
+from django.core.files.base import ContentFile
+from django.views.decorators.csrf import csrf_exempt
 from api.models import User, Profile ,Customer
 from api.serializers import UserSerializer, MyTokenObtainPairSerializer, RegisterSerializer ,ProfileSerializer ,CustomerSerializer
 from rest_framework.decorators import api_view,permission_classes
@@ -149,81 +154,122 @@ class PasswordResetRequestView(APIView):
         # Always return success to prevent email enumeration
         return Response({"message": "If an account with this email exists, a reset link has been sent."}, status=status.HTTP_200_OK)
     
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])  # Protect API access
-def upload_customers_from_excel(request):
-    if 'excel_file' not in request.FILES:
-        return Response({"error": "No file provided."}, status=status.HTTP_400_BAD_REQUEST)
 
-    excel_file = request.FILES['excel_file']
-    fs = FileSystemStorage()
-    filename = fs.save(excel_file.name, excel_file)
-    uploaded_file_path = fs.path(filename)
+# Load the trained model and feature columns
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, 'churn_model.pkl')
+FEATURES_PATH = os.path.join(BASE_DIR, 'X_train_columns.pkl')
+
+# Load model and features
+model = joblib.load(MODEL_PATH)
+feature_columns = joblib.load(FEATURES_PATH)
+
+@csrf_exempt
+def upload_customers_from_csv(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid request method'}, status=405)
+
+    if 'file' not in request.FILES:
+        return JsonResponse({'error': 'No file uploaded'}, status=400)
 
     try:
-        df = pd.read_excel(uploaded_file_path)
+        file = request.FILES['file']
+        if not file.name.endswith('.csv'):
+            return JsonResponse({'error': 'Invalid file format, please upload a CSV file'}, status=400)
 
-        
-        with transaction.atomic():  # Ensure atomicity
-            # **1. Clear all existing customer records**
-            Customer.objects.all().delete()
+        # Save temporary file
+        file_path = default_storage.save('temp/' + file.name, ContentFile(file.read()))
+        df = pd.read_csv(file_path)
+        os.remove(file_path)  # Clean up the temporary file
 
-            # **2. Store unique emails to avoid duplication in the new upload**
-            unique_emails = set()
+        # Ensure all required columns are present
+        required_columns = [
+            "customerID", "gender", "SeniorCitizen", "Partner", "Dependents",
+            "tenure", "PhoneService", "MultipleLines", "InternetService",
+            "OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport",
+            "StreamingTV", "StreamingMovies", "Contract", "PaperlessBilling",
+            "PaymentMethod", "MonthlyCharges", "TotalCharges", "Age",
+            "SatisfactionScore", "CustomerSupportCalls", "PaymentTimeliness",
+            "LifetimeValue", "AverageDailyUsage", "Email"
+        ]
 
-            customers = []
-            for _, row in df.iterrows():
-                email = str(row.get('Email', '')).strip()
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return JsonResponse({'error': f'Missing columns: {missing_columns}'}, status=400)
 
-                # Skip empty or duplicate emails
-                if not email or email in unique_emails:
-                    continue  
-                
-                unique_emails.add(email)  # Add email to the set
+        if df.empty:
+            return JsonResponse({'error': 'CSV file is empty or corrupt'}, status=400)
 
-                customers.append(Customer(
-                    customerID=row.get('customerID', ''),
-                    gender=row.get('gender', 0),
-                    SeniorCitizen=row.get('SeniorCitizen', 0),
-                    Partner=row.get('Partner', 0),
-                    Dependents=row.get('Dependents', 0),
-                    tenure=row.get('tenure', 0),
-                    PhoneService=row.get('PhoneService', 0),
-                    MultipleLines=row.get('MultipleLines', 0),
-                    InternetService=row.get('InternetService', ''),
-                    OnlineSecurity=row.get('OnlineSecurity', 0),
-                    OnlineBackup=row.get('OnlineBackup', 0),
-                    DeviceProtection=row.get('DeviceProtection', 0),
-                    TechSupport=row.get('TechSupport', 0),
-                    StreamingTV=row.get('StreamingTV', 0),
-                    StreamingMovies=row.get('StreamingMovies', 0),
-                    Contract=row.get('Contract', ''),
-                    PaperlessBilling=row.get('PaperlessBilling', 0),
-                    PaymentMethod=row.get('PaymentMethod', ''),
-                    MonthlyCharges=row.get('MonthlyCharges', 0.0),
-                    TotalCharges=row.get('TotalCharges', 0.0),
-                    Churn=row.get('Churn', 0),
-                    Age=row.get('Age', 0),
-                    SatisfactionScore=row.get('SatisfactionScore', 0),
-                    CustomerSupportCalls=row.get('CustomerSupportCalls', 0),
-                    PaymentTimeliness=row.get('PaymentTimeliness', 0),
-                    LifetimeValue=row.get('LifetimeValue', 0.0),
-                    AverageDailyUsage=row.get('AverageDailyUsage', 0.0),
-                    Email=email
-                ))
+        # Convert categorical binary values
+        binary_columns = [
+            "Partner", "Dependents", "PhoneService", "MultipleLines",
+            "OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport",
+            "StreamingTV", "StreamingMovies", "PaperlessBilling",
+            "PaymentTimeliness", "gender", "SatisfactionScore"
+        ]
 
-            # **3. Bulk insert for efficiency**
-            Customer.objects.bulk_create(customers)
+        df[binary_columns] = df[binary_columns].replace({
+            'Yes': 1, 'No': 0, 'No phone service': 0, 'No internet service': 0,
+            'On-time': 1, 'Late': 0, 'Male': 1, 'Female': 0, 'High': 1, 'Low': 0
+        })
 
-        return Response({"message": "Data imported successfully!"}, status=status.HTTP_201_CREATED)
+        # One-hot encode categorical columns
+        categorical_cols = ["InternetService", "Contract", "PaymentMethod"]
+        df = pd.get_dummies(df, columns=categorical_cols)
+
+        # Add missing columns and ensure order
+        for col in feature_columns:
+            if col not in df.columns:
+                df[col] = 0  # Add missing feature columns with default value
+
+        df = df[feature_columns]  # Ensure correct column order
+
+        # Predict churn probability and classify churn (1 for churned, 0 for not churned)
+        churn_probs = model.predict_proba(df)[:, 1]
+        churn_predictions = (churn_probs >= 0.5).astype(int)  # Threshold at 0.5
+
+        # Store data in database
+        customers = []
+        for i, row in df.iterrows():
+            customer = Customer(
+                customerID=row["customerID"],
+                gender=row["gender"],
+                SeniorCitizen=row["SeniorCitizen"],
+                Partner=row["Partner"],
+                Dependents=row["Dependents"],
+                tenure=row["tenure"],
+                PhoneService=row["PhoneService"],
+                MultipleLines=row["MultipleLines"],
+                InternetService="Unknown",  # Categorical data converted
+                OnlineSecurity=row["OnlineSecurity"],
+                OnlineBackup=row["OnlineBackup"],
+                DeviceProtection=row["DeviceProtection"],
+                TechSupport=row["TechSupport"],
+                StreamingTV=row["StreamingTV"],
+                StreamingMovies=row["StreamingMovies"],
+                Contract="Unknown",  # Categorical data converted
+                PaperlessBilling=row["PaperlessBilling"],
+                PaymentMethod="Unknown",  # Categorical data converted
+                MonthlyCharges=row["MonthlyCharges"],
+                TotalCharges=row["TotalCharges"],
+                Churn=churn_predictions[i],  # Assign predicted churn value
+                Age=row["Age"],
+                SatisfactionScore=row["SatisfactionScore"],
+                CustomerSupportCalls=row["CustomerSupportCalls"],
+                PaymentTimeliness=row["PaymentTimeliness"],
+                LifetimeValue=row["LifetimeValue"],
+                AverageDailyUsage=row["AverageDailyUsage"],
+                Email=row["Email"],
+                churn_probability=churn_probs[i]  # Store probability
+            )
+            customers.append(customer)
+
+        Customer.objects.bulk_create(customers)
+
+        return JsonResponse({'message': f'{len(customers)} customers added with churn predictions'}, status=201)
 
     except Exception as e:
-        return Response({"error": f"Error occurred: {e}"}, status=status.HTTP_400_BAD_REQUEST)
-
-
-    finally:
-        if fs.exists(filename):  # Ensure file exists before deleting
-            fs.delete(filename)
+        return JsonResponse({'error': str(e)}, status=500)
 
 @api_view(['GET'])  # Protect API access
 @permission_classes([IsAuthenticated])
@@ -265,3 +311,134 @@ def chatbot_customers(request):
     # Only retrieve minimal data needed for chatbot (e.g., names, last interactions)
     customers = Customer.objects.values('id', 'name', 'last_interaction')[:50]  # Limit results
     return Response({'customers': list(customers)}) 
+
+
+X_train_columns = [
+    'gender','SeniorCitizen', 'Partner', 'Dependents', 'tenure', 'PhoneService',
+    'MultipleLines', 'InternetService_Fiber optic', 'InternetService_No',  # Fixed this
+    'OnlineSecurity', 'OnlineBackup', 'DeviceProtection', 'TechSupport',
+    'StreamingTV', 'StreamingMovies', 'Contract_One year', 'Contract_Two year',
+    'PaperlessBilling', 'PaymentMethod_Credit card (automatic)',
+    'PaymentMethod_Electronic check', 'PaymentMethod_Mailed check',
+    'MonthlyCharges', 'TotalCharges', 'Age', 'SatisfactionScore',
+    'CustomerSupportCalls', 'PaymentTimeliness', 'LifetimeValue', 'AverageDailyUsage'
+]
+
+MODEL_PATH = "api/churn_model.pkl"
+FEATURES_PATH = "api/X_train_columns.pkl"
+
+model = joblib.load(MODEL_PATH)
+X_train_columns = joblib.load(FEATURES_PATH)
+
+model = joblib.load(MODEL_PATH)
+X_train_columns = joblib.load(FEATURES_PATH)
+
+@csrf_exempt  # Remove in production, use authentication
+def upload_and_predict(request):
+    if request.method == 'POST' and request.FILES.get('file'):
+        uploaded_file = request.FILES['file']
+
+        # Read CSV file
+        try:
+            df = pd.read_csv(uploaded_file)
+            if df.empty:
+                return JsonResponse({'error': 'Uploaded CSV file is empty'}, status=400)
+        except Exception as e:
+            return JsonResponse({'error': f'Invalid CSV file: {str(e)}'}, status=400)
+
+        # 🔹 Step 1: Convert binary categorical columns
+        binary_columns = ['Partner', 'Dependents', 'PhoneService', 'MultipleLines', 
+                          'OnlineSecurity', 'OnlineBackup', 'DeviceProtection', 
+                          'TechSupport', 'StreamingTV', 'StreamingMovies', 
+                          'PaperlessBilling', 'PaymentTimeliness', 'gender', 'SatisfactionScore']
+        
+        df[binary_columns] = df[binary_columns].replace({
+            'Yes': 1, 'No': 0, 'No phone service': 0, 'No internet service': 0, 
+            'On-time': 1, 'Late': 0, 'Male': 1, 'Female': 0, 'High': 1, 'Low': 0
+        })
+
+        # 🔹 Step 2: One-hot encoding
+        df_encoded = pd.get_dummies(df, drop_first=True)
+
+        # 🔹 Step 3: Ensure feature names match training set
+        missing_cols = set(X_train_columns) - set(df_encoded.columns)
+        for col in missing_cols:
+            df_encoded[col] = 0  # Add missing columns
+
+        extra_cols = set(df_encoded.columns) - set(X_train_columns)
+        if extra_cols:
+            print("⚠️ Extra columns removed:", extra_cols)
+            df_encoded.drop(columns=extra_cols, inplace=True)
+
+        # 🔹 Step 4: Ensure correct column order
+        df_encoded = df_encoded[X_train_columns].astype(float)
+
+        # 🔹 Step 5: Predict churn
+        df['Churn_Prediction'] = model.predict(df_encoded)
+        df['Churn_Probability'] = model.predict_proba(df_encoded)[:, 1]
+
+        # 🔹 Step 6: Handle duplicate emails (Update existing, Insert new)
+        existing_emails = set(Customer.objects.values_list('Email', flat=True))  # Get all existing emails
+        
+        customers_to_create = []
+        customers_to_update = []
+
+        for _, row in df.iterrows():
+            customer_data = {
+                'customerID': row.get('customerID', 'N/A'),
+                'gender': row.get('gender', 0),
+                'SeniorCitizen': row.get('SeniorCitizen', 0),
+                'Partner': row.get('Partner', 0),
+                'Dependents': row.get('Dependents', 0),
+                'tenure': row.get('tenure', 0),
+                'PhoneService': row.get('PhoneService', 0),
+                'MultipleLines': row.get('MultipleLines', 0),
+                'InternetService': row.get('InternetService', "Unknown"),
+                'OnlineSecurity': row.get('OnlineSecurity', 0),
+                'OnlineBackup': row.get('OnlineBackup', 0),
+                'DeviceProtection': row.get('DeviceProtection', 0),
+                'TechSupport': row.get('TechSupport', 0),
+                'StreamingTV': row.get('StreamingTV', 0),
+                'StreamingMovies': row.get('StreamingMovies', 0),
+                'Contract': row.get('Contract', "Unknown"),
+                'PaperlessBilling': row.get('PaperlessBilling', 0),
+                'PaymentMethod': row.get('PaymentMethod', "Unknown"),
+                'MonthlyCharges': row.get('MonthlyCharges', 0.0),
+                'TotalCharges': row.get('TotalCharges', 0.0),
+                'Churn': row.get('Churn_Prediction', 0),
+                'Age': row.get('Age', 0),
+                'SatisfactionScore': row.get('SatisfactionScore', 0),
+                'CustomerSupportCalls': row.get('CustomerSupportCalls', 0),
+                'PaymentTimeliness': row.get('PaymentTimeliness', 0),
+                'LifetimeValue': row.get('LifetimeValue', 0.0),
+                'AverageDailyUsage': row.get('AverageDailyUsage', 0.0),
+                'Email': row.get('Email', "unknown@example.com"),
+            }
+
+            if customer_data['Email'] in existing_emails:
+                # Update existing record
+                existing_customer = Customer.objects.get(Email=customer_data['Email'])
+                for key, value in customer_data.items():
+                    setattr(existing_customer, key, value)
+                customers_to_update.append(existing_customer)
+            else:
+                # Add new record
+                customers_to_create.append(Customer(**customer_data))
+
+        # Perform bulk updates and inserts
+        if customers_to_update:
+            Customer.objects.bulk_update(customers_to_update, [
+                'customerID', 'gender', 'SeniorCitizen', 'Partner', 'Dependents', 'tenure',
+                'PhoneService', 'MultipleLines', 'InternetService', 'OnlineSecurity',
+                'OnlineBackup', 'DeviceProtection', 'TechSupport', 'StreamingTV',
+                'StreamingMovies', 'Contract', 'PaperlessBilling', 'PaymentMethod',
+                'MonthlyCharges', 'TotalCharges', 'Churn', 'Age', 'SatisfactionScore',
+                'CustomerSupportCalls', 'PaymentTimeliness', 'LifetimeValue', 'AverageDailyUsage'
+            ])
+
+        if customers_to_create:
+            Customer.objects.bulk_create(customers_to_create)
+
+        return JsonResponse({'message': f'{len(customers_to_create)} new records added, {len(customers_to_update)} records updated!'}, status=200)
+
+    return JsonResponse({'error': 'No file uploaded'}, status=400)

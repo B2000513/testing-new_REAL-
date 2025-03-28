@@ -1,110 +1,98 @@
 import pandas as pd
 import joblib
-from django.core.files.storage import FileSystemStorage
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework import status
-from django.db import transaction
-from .models import Customer
+import os
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score
 
-# Load pre-trained churn prediction model and feature columns
-MODEL_PATH = 'churn_model.pkl'
-FEATURE_COLUMNS_PATH = 'X_train_columns.pkl'
-model = joblib.load(MODEL_PATH)
-X_train_columns = joblib.load(FEATURE_COLUMNS_PATH)
+# Load dataset
+dataset_path = 'new_synthetic_8.csv'
+synthetic_data = pd.read_csv(dataset_path)
 
-# Preprocessing function
-def preprocess_data(df):
-    binary_columns = ['Partner', 'Dependents', 'PhoneService', 'MultipleLines', 
-                      'OnlineSecurity', 'OnlineBackup', 'DeviceProtection', 
-                      'TechSupport', 'StreamingTV', 'StreamingMovies', 
-                      'PaperlessBilling', 'PaymentTimeliness', 'gender', 'SatisfactionScore']
-    
-    df[binary_columns] = df[binary_columns].replace({
-        'Yes': 1, 'No': 0, 'No phone service': 0, 'No internet service': 0, 
-        'On-time': 1, 'Late': 0, 'Male': 1, 'Female': 0, 'High': 1, 'Low': 0
-    })
-    
-    df_encoded = pd.get_dummies(df, drop_first=True)
-    
-    # Handle missing columns
-    missing_cols = set(X_train_columns) - set(df_encoded.columns)
-    for col in missing_cols:
-        df_encoded[col] = 0
-    
-    # Ensure correct column order
-    df_encoded = df_encoded[X_train_columns]
-    
-    return df_encoded
+# Drop irrelevant columns
+synthetic_data.drop(['customerID', 'Email'], axis=1, inplace=True)
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def upload_customers_from_excel(request):
-    if 'excel_file' not in request.FILES:
-        return Response({"error": "No file provided."}, status=status.HTTP_400_BAD_REQUEST)
-    
-    excel_file = request.FILES['excel_file']
-    fs = FileSystemStorage()
-    filename = fs.save(excel_file.name, excel_file)
-    uploaded_file_path = fs.path(filename)
-    
-    try:
-        df = pd.read_excel(uploaded_file_path)
-        df = preprocess_data(df)  # Preprocess data for prediction
-        df['Churn_Prediction'] = model.predict(df)
-        df['Churn_Probability'] = model.predict_proba(df)[:, 1]
-        
-        with transaction.atomic():  # Ensure atomicity
-            Customer.objects.all().delete()  # Clear existing records
-            unique_emails = set()
-            customers = []
-            
-            for _, row in df.iterrows():
-                email = str(row.get('Email', '')).strip()
-                if not email or email in unique_emails:
-                    continue  
-                unique_emails.add(email)
-                
-                customers.append(Customer(
-                    customerID=row.get('customerID', ''),
-                    gender=row.get('gender', 0),
-                    SeniorCitizen=row.get('SeniorCitizen', 0),
-                    Partner=row.get('Partner', 0),
-                    Dependents=row.get('Dependents', 0),
-                    tenure=row.get('tenure', 0),
-                    PhoneService=row.get('PhoneService', 0),
-                    MultipleLines=row.get('MultipleLines', 0),
-                    InternetService=row.get('InternetService', ''),
-                    OnlineSecurity=row.get('OnlineSecurity', 0),
-                    OnlineBackup=row.get('OnlineBackup', 0),
-                    DeviceProtection=row.get('DeviceProtection', 0),
-                    TechSupport=row.get('TechSupport', 0),
-                    StreamingTV=row.get('StreamingTV', 0),
-                    StreamingMovies=row.get('StreamingMovies', 0),
-                    Contract=row.get('Contract', ''),
-                    PaperlessBilling=row.get('PaperlessBilling', 0),
-                    PaymentMethod=row.get('PaymentMethod', ''),
-                    MonthlyCharges=row.get('MonthlyCharges', 0.0),
-                    TotalCharges=row.get('TotalCharges', 0.0),
-                    Churn=row.get('Churn_Prediction', 0),
-                    ChurnProbability=row.get('Churn_Probability', 0.0),
-                    Age=row.get('Age', 0),
-                    SatisfactionScore=row.get('SatisfactionScore', 0),
-                    CustomerSupportCalls=row.get('CustomerSupportCalls', 0),
-                    PaymentTimeliness=row.get('PaymentTimeliness', 0),
-                    LifetimeValue=row.get('LifetimeValue', 0.0),
-                    AverageDailyUsage=row.get('AverageDailyUsage', 0.0),
-                    Email=email
-                ))
-            
-            Customer.objects.bulk_create(customers)  # Bulk insert for efficiency
-        
-        return Response({"message": "Data imported and predictions saved successfully!"}, status=status.HTTP_201_CREATED)
-    
-    except Exception as e:
-        return Response({"error": f"Error occurred: {e}"}, status=status.HTTP_400_BAD_REQUEST)
-    
-    finally:
-        if fs.exists(filename):
-            fs.delete(filename)
+# Convert categorical binary columns to 0/1
+binary_columns = ['Partner', 'Dependents', 'PhoneService', 'MultipleLines', 
+                  'OnlineSecurity', 'OnlineBackup', 'DeviceProtection', 
+                  'TechSupport', 'StreamingTV', 'StreamingMovies', 
+                  'PaperlessBilling', 'PaymentTimeliness', 'gender', 'SatisfactionScore']
+
+synthetic_data[binary_columns] = synthetic_data[binary_columns].replace({
+    'Yes': 1, 'No': 0, 'No phone service': 0, 'No internet service': 0, 
+    'On-time': 1, 'Late': 0, 'Male': 1, 'Female': 0, 'High': 1, 'Low': 0
+})
+
+# One-hot encoding for categorical variables
+df_encoded = pd.get_dummies(synthetic_data, drop_first=True)
+
+# Define features and target
+X = df_encoded.drop('Churn', axis=1)
+y = df_encoded['Churn']
+
+# Split dataset
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42)
+
+# Save feature columns
+joblib.dump(X.columns.tolist(), 'X_train_columns.pkl')
+
+# Train logistic regression model
+model = LogisticRegression(max_iter=1000)
+model.fit(X_train, y_train)
+
+# Predictions
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:, 1]
+
+# Model evaluation
+#print(f"Accuracy: {accuracy_score(y_test, y_pred)}")
+###print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+
+# Feature importance
+#coefficients = pd.DataFrame({'Feature': X.columns, 'Coefficient': model.coef_[0]})
+#print("Feature Importance:\n", coefficients.sort_values(by='Coefficient', ascending=False))
+
+# Save model
+joblib.dump(model, 'churn_model.pkl')
+
+# Load trained model
+model = joblib.load('churn_model.pkl')
+
+# Load new dataset
+input_path = 'C:/Users/Ncjy1/OneDrive/Desktop/Datasets/Churn/new_synthetic_7.csv'
+input_dataset = pd.read_csv(input_path)
+
+# Preprocessing
+input_dataset[binary_columns] = input_dataset[binary_columns].replace({
+    'Yes': 1, 'No': 0, 'No phone service': 0, 'No internet service': 0, 
+    'On-time': 1, 'Late': 0, 'Male': 1, 'Female': 0, 'High': 1, 'Low': 0
+})
+
+# One-hot encoding
+input_dataset_encoded = pd.get_dummies(input_dataset, drop_first=True)
+
+# Load feature columns
+X_train_columns = joblib.load('X_train_columns.pkl')
+
+# Handle missing columns
+missing_cols = set(X_train_columns) - set(input_dataset_encoded.columns)
+for col in missing_cols:
+    input_dataset_encoded[col] = 0
+
+# Log extra columns (for debugging)
+extra_cols = set(input_dataset_encoded.columns) - set(X_train_columns)
+if extra_cols:
+    print("Warning: Extra columns found in new dataset -", extra_cols)
+
+# Ensure correct column order
+input_dataset_encoded = input_dataset_encoded[X_train_columns]
+
+# Predict churn
+input_dataset['Churn_Prediction'] = model.predict(input_dataset_encoded)
+input_dataset['Churn_Probability'] = model.predict_proba(input_dataset_encoded)[:, 1]
+
+# Save predictions
+output_path = 'C:/Users/Ncjy1/OneDrive/Desktop/Datasets/Churn/new_synthetic_7_churned.csv'
+input_dataset.to_csv(output_path, index=False)
+
+print(f"Predictions saved successfully to '{output_path}'")
